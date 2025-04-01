@@ -26,8 +26,8 @@ graph TD
         StandbyDB[("laterbase-standby<br>PostgreSQL Standby")]
         BackupAgent["laterbase-backup-agent<br>(Hourly pg_dump, rclone upload, retention)"]
         PgAdminUI[("laterbase-pgadmin<br>pgAdmin 4 UI")]
-        BackupVolume[Local Backups<br>(./backups)]
-        RcloneConfigVolume[/Rclone Config<br>(./rclone_config)/]
+        BackupVolume["Local Backups backups"]
+        RcloneConfigVolume[Rclone Config<br>./rclone_config]
     end
 
     subgraph "Cloud Storage (Optional)"

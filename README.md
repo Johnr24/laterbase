@@ -18,14 +18,14 @@ This diagram shows how the Laterbase components interact with your primary DaVin
 graph TD
     subgraph "DaVinci Resolve Host"
         PrimaryDB[(Primary PostgreSQL DB)]
-        ReplicationSlot[Physical Replication Slot\n(laterbase_standby_slot)]
+        ReplicationSlot["Physical Replication Slot<br>(laterbase_standby_slot)"]
         PrimaryDB -- Manages --> ReplicationSlot
     end
 
     subgraph "Laterbase (Docker Host)"
-        StandbyDB[("laterbase-standby"\nPostgreSQL Standby)]
-        BackupAgent["laterbase-backup-agent"\n(Hourly pg_dump)]
-        PgAdminUI[("laterbase-pgadmin"\npgAdmin 4 UI)]
+        StandbyDB[("laterbase-standby<br>PostgreSQL Standby")]
+        BackupAgent["laterbase-backup-agent<br>(Hourly pg_dump)"]
+        PgAdminUI[("laterbase-pgadmin<br>pgAdmin 4 UI")]
         BackupVolume[/backups Volume/]
     end
 

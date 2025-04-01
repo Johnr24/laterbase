@@ -2,20 +2,30 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+We are committed to ensuring the security of the Laterbase project. Security updates are provided for the latest released version.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Latest  | :white_check_mark: |
+| < Latest| :x:                |
+
+If you are using an older version, please update to the latest release to benefit from security patches.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+We take security vulnerabilities seriously. If you discover a security issue in Laterbase, please report it to us privately to allow us time to address it before public disclosure.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+**How to Report:**
+
+*   Please email the details of the vulnerability to: `security@shed.gay`
+*   Include a clear description of the vulnerability, steps to reproduce it, and any potential impact.
+*   If possible, include version information and relevant configuration details.
+
+**What to Expect:**
+
+*   We will acknowledge receipt of your report within 48 hours (excluding weekends and holidays).
+*   We will investigate the report and aim to provide an initial assessment within 5 business days.
+*   We will keep you informed of the progress towards a fix and potential release timeline.
+*   We kindly ask that you do not disclose the vulnerability publicly until we have had a reasonable time to release a patch. We will coordinate with you on the disclosure timeline.
+
+Thank you for helping keep Laterbase secure.

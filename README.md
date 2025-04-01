@@ -27,7 +27,7 @@ graph TD
         BackupAgent["laterbase-backup-agent<br>(Hourly pg_dump, rclone upload, retention)"]
         PgAdminUI[("laterbase-pgadmin<br>pgAdmin 4 UI")]
         BackupVolume["Local Backups backups"]
-        RcloneConfigVolume[Rclone Config<br>./rclone_config]
+        RcloneConfigVolume[Rclone Config<br>./rclone_config<br>(Dynamically Generated)]
     end
 
     subgraph "Cloud Storage (Optional)"
@@ -65,9 +65,15 @@ graph TD
     *   Replace `YOUR_PGADMIN_PASSWORD_HERE` with the password you want for the pgAdmin login.
     *   Adjust `PRIMARY_PORT` or `PRIMARY_USER` if they differ from the defaults (5432, postgres).
     *   Optionally, uncomment and set `POSTGRES_USER`, `POSTGRES_DB`, or `PGDATA` under the "Standby Server Configuration" section to override the defaults used by the standby service.
-    *   **Rclone Upload (Optional):**
-        *   Set `RCLONE_REMOTE_NAME` to the name of the remote you have configured in your `rclone.conf` file (e.g., `mygdrive`, `s3remote`). Leave blank to disable uploads.
-        *   Set `RCLONE_REMOTE_PATH` to the directory path within your rclone remote where backups should be stored (e.g., `resolve_backups/production`). Leave blank to disable uploads.
+    *   **Backup Agent - Active Rclone Destination (Optional):**
+        *   Set `RCLONE_REMOTE_NAME` to the name of the rclone remote you want the backup agent to **use** for uploads (e.g., `my_google_drive_backup`, `my_s3_backup`). This remote must be defined either dynamically (see next section) or manually in `./rclone_config/rclone.conf`. Leave blank to disable cloud uploads.
+        *   Set `RCLONE_REMOTE_PATH` to the directory path within the *active* rclone remote where backups should be stored (e.g., `resolve_backups/production`). Leave blank if `RCLONE_REMOTE_NAME` is blank.
+    *   **Backup Agent - Dynamic Rclone Remote Configuration (Optional):**
+        *   Instead of manually creating `./rclone_config/rclone.conf`, you can define remotes directly in the `.env` file using a specific format. The backup agent's entrypoint script will automatically create the necessary configuration inside the container when it starts.
+        *   Use the `RCLONE_REMOTE_<N>_...` variables as shown in `.env.example` (where `N` is a number starting from 1).
+        *   Define `RCLONE_REMOTE_<N>_NAME` (e.g., `my_s3_backup`) and `RCLONE_REMOTE_<N>_TYPE` (e.g., `s3`).
+        *   Add provider-specific parameters using `RCLONE_REMOTE_<N>_PARAM_<KEY>` (e.g., `RCLONE_REMOTE_1_PARAM_ACCESS_KEY_ID=...`). The `<KEY>` should be the lowercase version of the parameter name rclone expects (e.g., `access_key_id`, `secret_access_key`, `service_account_credentials`). Refer to `rclone config create --help` or the rclone documentation for specific provider parameters.
+        *   See `.env.example` for detailed examples for Google Drive, S3, B2, etc.
     *   **Backup Retention (Optional):**
         *   Set `BACKUP_RETENTION_DAYS` to the number of days you want to keep local backups in the `./backups` directory. Defaults to 7 if not set.
 
@@ -125,14 +131,26 @@ graph TD
         mkdir backups
         ```
 
-4.  **Rclone Configuration (Optional):**
-    *   If you want to use the cloud upload feature:
-        *   Create a directory named `rclone_config` in the same directory as `docker-compose.yml`:
+4.  **Rclone Configuration (Optional - Choose One Method):**
+
+    *   **Method A: Dynamic Configuration via `.env` (Recommended)**
+        *   Define your desired rclone remotes directly in the `.env` file using the `RCLONE_REMOTE_<N>_...` variables as described in the `.env` File section above and shown in `.env.example`.
+        *   The `laterbase-backup-agent` container will automatically generate the necessary `/config/rclone.conf` file internally when it starts based on these environment variables.
+        *   You still need to create the host directory for persistence, although the file inside will be managed by the container:
             ```bash
             mkdir rclone_config
             ```
-        *   Place your configured `rclone.conf` file inside the `./rclone_config/` directory. The backup container will mount this directory read-only at `/config/rclone/rclone.conf`. (Note: path inside container updated)
-        *   Ensure the remote name you use in `rclone.conf` matches the `RCLONE_REMOTE_NAME` set in your `.env` file.
+        *   Ensure the `RCLONE_REMOTE_NAME` variable in `.env` matches one of the `RCLONE_REMOTE_<N>_NAME` values you defined.
+
+    *   **Method B: Manual `rclone.conf` File**
+        *   If you prefer to manage the `rclone.conf` file manually or have complex configurations not easily represented by environment variables:
+        *   Create the directory:
+            ```bash
+            mkdir rclone_config
+            ```
+        *   Place your fully configured `rclone.conf` file inside `./rclone_config/`.
+        *   **Important:** If using this method, **do not** set any `RCLONE_REMOTE_<N>_...` variables in your `.env` file, as the entrypoint script might overwrite or conflict with your manual configuration.
+        *   Ensure the remote name you want to use matches the `RCLONE_REMOTE_NAME` set in your `.env` file.
         *   **Security Note:** The `rclone.conf` file contains sensitive credentials. Ensure appropriate file permissions are set on the host machine (`chmod 600 ./rclone_config/rclone.conf`).
 
 ## Usage
@@ -172,7 +190,7 @@ graph TD
 *   `app/prepare_primary_db.sh`: **(New)** Script to automate granting replication role and creating the replication slot on the primary server via `psql`. Run manually before starting services.
 *   `app/setup_standby.sh`: Script run inside the standby container on first start to perform the initial base backup and configure replication.
 *   `backup/backup.sh`: Script run by cron inside the backup agent container to perform hourly `pg_dump` backups, optionally upload via rclone, and manage retention.
-*   `backup/entrypoint.sh`: Entrypoint for backup container, sets up cron.
+*   `backup/entrypoint.sh`: Entrypoint for backup container. Dynamically configures rclone based on `RCLONE_REMOTE_<N>_...` environment variables (if present) before starting the cron daemon (managed by Ofelia).
 *   `backup/crontab.txt`: Defines the cron schedule for `backup.sh`.
 *   `./backups/` (Directory to be created): Host directory where local backup files (`.sql.gz`) will be stored by the backup agent.
 *   `./rclone_config/` (Directory to be created, optional): Host directory containing the `rclone.conf` file for cloud uploads.

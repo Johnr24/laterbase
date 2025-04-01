@@ -34,3 +34,6 @@ Thumbs.db
 
 # Coverage
 /backups
+
+#plan
+PLAN_rclone_config.md

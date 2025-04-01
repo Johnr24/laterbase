@@ -4,8 +4,8 @@ services:
   # --- Standby Replication Service ---
   laterbase-standby:
     build:
-      context: .
-      dockerfile: Dockerfile # Use the main Dockerfile
+      context: ./app # Updated context
+      dockerfile: Dockerfile # Use the main Dockerfile (relative to context)
     container_name: laterbase_standby
     env_file:
       - .env
@@ -38,8 +38,8 @@ services:
   # --- Hourly Backup Agent Service ---
   laterbase-backup-agent:
     build:
-      context: .
-      dockerfile: Dockerfile.backup # Use the backup Dockerfile
+      context: ./backup # Updated context
+      dockerfile: Dockerfile.backup # Use the backup Dockerfile (relative to context)
     container_name: laterbase_backup_agent
     env_file:
       - .env

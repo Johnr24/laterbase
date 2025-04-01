@@ -10,12 +10,39 @@ This project, nicknamed "Laterbase", sets up a Docker-based environment specific
   <img src="readme/laterbase.gif" alt="Jonson From the Peepshow saying Screw it, Sort it Later Stick it on the Laterbase">
 </p>
 
+## Architecture Overview
 
+This diagram shows how the Laterbase components interact with your primary DaVinci Resolve PostgreSQL database:
 
+```mermaid
+graph TD
+    subgraph "DaVinci Resolve Host"
+        PrimaryDB[(Primary PostgreSQL DB)]
+        ReplicationSlot[Physical Replication Slot\n(laterbase_standby_slot)]
+        PrimaryDB -- Manages --> ReplicationSlot
+    end
 
+    subgraph "Laterbase (Docker Host)"
+        StandbyDB[("laterbase-standby"\nPostgreSQL Standby)]
+        BackupAgent["laterbase-backup-agent"\n(Hourly pg_dump)]
+        PgAdminUI[("laterbase-pgadmin"\npgAdmin 4 UI)]
+        BackupVolume[/backups Volume/]
+    end
+
+    PrimaryDB -- Streaming Replication --> StandbyDB
+    PrimaryDB -- pg_dump --> BackupAgent
+    BackupAgent -- Writes .sql.gz --> BackupVolume
+    PgAdminUI -- User Connects --> PrimaryDB
+    PgAdminUI -- User Connects --> StandbyDB
+    StandbyDB -- Uses --> ReplicationSlot
+
+    style PrimaryDB fill:#f9f,stroke:#333,stroke-width:2px
+    style StandbyDB fill:#ccf,stroke:#333,stroke-width:2px
+    style BackupAgent fill:#cfc,stroke:#333,stroke-width:2px
+    style PgAdminUI fill:#ffc,stroke:#333,stroke-width:2px
+```
 
 ## Configuration
-
 1.  **`.env` File:**
     *   Open the `.env` file.
     *   Set `PRIMARY_HOST` to the hostname or IP address of your main **DaVinci Resolve** PostgreSQL server.

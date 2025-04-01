@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # --- Standby Replication Service ---
+  laterbase-standby:
+    build:
+      context: .
+      dockerfile: Dockerfile # Use the main Dockerfile
+    container_name: laterbase_standby
+    env_file:
+      - .env
+    environment:
+      # --- Required by setup_standby.sh ---
+      PRIMARY_HOST: ${PRIMARY_HOST}
+      REPL_PASSWORD: ${REPL_PASSWORD}
+
+      # --- PostgreSQL Runtime Configuration (sourced from .env, with defaults) ---
+      # User that the PostgreSQL server runs as and owns the data directory
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # Placeholder database name created on init (actual data comes from primary)
+      POSTGRES_DB: ${POSTGRES_DB:-laterbase_standby_db}
+      # Path inside the container where PostgreSQL data is stored
+      PGDATA: ${PGDATA:-/var/lib/postgresql/data/pgdata}
+
+      # --- Other Settings ---
+      POSTGRES_INITDB_ARGS: "--no-sync" # Faster init, safe for initial setup
+    volumes:
+      # Mount a persistent volume for the standby database data
+      # The target path MUST match the PGDATA environment variable
+      - laterbase_standby_data:${PGDATA:-/var/lib/postgresql/data/pgdata}
+    ports:
+      # Map standby's internal port 5432 to host port 5433
+      - "5433:5432"
+    restart: unless-stopped
+    networks:
+      - laterbase_net
+
+  # --- Hourly Backup Agent Service ---
+  laterbase-backup-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup # Use the backup Dockerfile
+    container_name: laterbase_backup_agent
+    env_file:
+      - .env
+    environment:
+      # Required by backup.sh:
+      PRIMARY_HOST: ${PRIMARY_HOST}
+      PGPASSWORD: ${REPL_PASSWORD} # backup.sh expects PGPASSWORD
+      PRIMARY_DB: ${PRIMARY_DB:-YOUR_RESOLVE_DB_NAME_HERE} # Add PRIMARY_DB to .env!
+      # Optional: Define these in .env if different from defaults in backup.sh
+      # PRIMARY_PORT: ${PRIMARY_PORT:-5432}
+      # PRIMARY_USER: ${PRIMARY_USER:-postgres}
+    volumes:
+      # Mount a local directory on the host to store the backups
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - laterbase_net
+
+  # --- pgAdmin UI Service ---
+  laterbase-pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: laterbase_pgadmin
+    environment:
+      # Set these in your .env file or replace placeholders here
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-YOUR_PGADMIN_EMAIL_HERE}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-YOUR_PGADMIN_PASSWORD_HERE}
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      # Map host port 5050 to pgAdmin container port 80
+      - "5050:80"
+    volumes:
+      # Persist pgAdmin configuration and server definitions
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - laterbase_net
+    restart: unless-stopped
+
+volumes:
+  # Volume for standby PostgreSQL data
+  laterbase_standby_data:
+    driver: local
+  # Volume for pgAdmin data
+  laterbase_pgadmin_data:
+    driver: local
+  # Note: Backup data is stored in the host directory './backups' via bind mount
+
+networks:
+  # Network for communication between services
+  laterbase_net:
+    driver: bridge

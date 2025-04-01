@@ -1,0 +1,31 @@
+# Git files
+.git
+.gitignore
+
+# Docker files
+.dockerignore
+Dockerfile
+Dockerfile.*
+docker-compose.yml
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+logs
+*.log
+
+# Node modules (if applicable, often installed within the Dockerfile)
+node_modules
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Other potentially sensitive or unnecessary files
+*.md
+backup.sh
+crontab.txt
+setup_standby.sh
+whatiwant.md

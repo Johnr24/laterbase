@@ -1,0 +1,4 @@
+# Run the backup script at the beginning of every hour (minute 0)
+0 * * * * root /app/backup.sh >> /var/log/cron.log 2>&1
+
+# An empty line is required at the end of the file for cron to process correctly.

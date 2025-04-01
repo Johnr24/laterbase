@@ -1,0 +1,28 @@
+# Use a slim Debian image as a base, as we only need client tools and cron
+FROM debian:bullseye-slim
+
+# Install cron and postgresql-client (which includes pg_dump)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cron \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directory for backup scripts and backups
+RUN mkdir -p /etc/cron.d /app /backups
+
+# Copy the backup script and crontab
+COPY backup.sh /app/backup.sh
+COPY crontab.txt /etc/cron.d/backup-cron
+
+# Make backup script executable and give execution rights on the crontab file
+RUN chmod +x /app/backup.sh && \
+    chmod 0644 /etc/cron.d/backup-cron && \
+    # Create the log file to be able to run tail
+    touch /var/log/cron.log
+
+# Set working directory
+WORKDIR /app
+
+# Run cron in the foreground
+# Also tail the cron log so we can see cron activity with 'docker logs'
+CMD cron && tail -f /var/log/cron.log

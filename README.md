@@ -27,21 +27,8 @@ This project, nicknamed "Laterbase", sets up a Docker-based environment specific
     *   Optionally, uncomment and set `POSTGRES_USER`, `POSTGRES_DB`, or `PGDATA` under the "Standby Server Configuration" section to override the defaults used by the standby service.
 
 2.  **Primary PostgreSQL Server Preparation (`PRIMARY_HOST`):**
-    *   **`postgresql.conf`:**
-        *   Ensure `wal_level = replica` (or higher, e.g., `logical`).
-        *   Ensure `max_wal_senders` is set to a value sufficient for the standby (e.g., at least 1, recommend 5 or more for flexibility).
-        *   Ensure `listen_addresses` includes the IP address the Docker host will use to connect, or `'*'`.
-    *   **`pg_hba.conf`:**
-        *   Add a line to allow replication connections from the Docker host's IP address for the replication user (`postgres` by default) using the specified password. Example (replace `<docker-host-ip>` and `<replication-user>`):
-            ```
-            # TYPE  DATABASE        USER            ADDRESS                 METHOD
-            host    replication     <replication-user> <docker-host-ip>/32    md5
-            ```
-        *   Also ensure regular connections are allowed for the backup agent and pgAdmin from the Docker host IP. Example:
-            ```
-            # TYPE  DATABASE        USER            ADDRESS                 METHOD
-            host    all             <replication-user> <docker-host-ip>/32    md5
-            ```
+    * Ensure the target database is marked as shared or accessible on the resolve box
+
     *   **Replication User:**
         *   Ensure the user specified (`postgres` or `PRIMARY_USER`) exists.
         *   Grant the `REPLICATION` role to the user: `ALTER USER <replication-user> WITH REPLICATION;`

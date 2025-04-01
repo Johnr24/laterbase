@@ -36,12 +36,12 @@ graph TD
     PgAdminUI -- User Connects --> StandbyDB
     StandbyDB -- Uses --> ReplicationSlot
 
-    style PrimaryDB fill:#add8e6,stroke:#333,stroke-width:2px
-    style StandbyDB fill:#b0c4de,stroke:#333,stroke-width:2px
-    style BackupAgent fill:#98fb98,stroke:#333,stroke-width:2px
-    style PgAdminUI fill:#d3d3d3,stroke:#333,stroke-width:2px
-    style ReplicationSlot fill:#ffa07a,stroke:#333,stroke-width:1px
-    style BackupVolume fill:#f5f5dc,stroke:#333,stroke-width:1px
+    style PrimaryDB fill:#071782,stroke:#333,stroke-width:2px
+    style StandbyDB fill:#374ac4,stroke:#333,stroke-width:2px
+    style BackupAgent fill:#6b0b9e,stroke:#333,stroke-width:2px
+    style PgAdminUI fill:#0b9e92,stroke:#333,stroke-width:2px
+    style ReplicationSlot fill:#359e0b,stroke:#333,stroke-width:1px
+    style BackupVolume fill:#9e8f0b,stroke:#333,stroke-width:1px
 ```
 
 **Note on Physical Replication Slot:** A physical replication slot (`laterbase_standby_slot` in this setup) is a feature on the primary PostgreSQL server. It ensures that the primary server retains the necessary transaction logs (WAL segments) required by the standby server, even if the standby disconnects temporarily. This prevents the standby from falling too far behind and needing a full resynchronization.

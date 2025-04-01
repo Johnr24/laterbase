@@ -31,3 +31,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Coverage
+/backups

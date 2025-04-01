@@ -49,6 +49,11 @@ echo "Base backup completed."
 touch "$PGDATA/standby.signal"
 echo "Created standby.signal file."
 
+# Add rule to allow connections from Docker network (e.g., pgAdmin container)
+# Use 192.168.65.0/24 based on the error message IP 192.168.65.1
+echo "Adding pgAdmin access rule to standby's pg_hba.conf..."
+echo "host    all             all             192.168.65.0/24         md5" >> "$PGDATA/pg_hba.conf"
+
 # Configure primary connection info in postgresql.auto.conf
 # This file is automatically included by postgresql.conf
 # Using default user 'postgres'. Adjust if needed.

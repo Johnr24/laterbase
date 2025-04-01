@@ -6,21 +6,12 @@ This project, nicknamed "Laterbase", sets up a Docker-based environment specific
 2.  **Hourly Backup Agent:** Performs hourly logical backups (`pg_dump`) of your primary DaVinci Resolve database.
 3.  **pgAdmin 4 UI:** Provides a web-based graphical interface for managing and monitoring both the primary DaVinci Resolve database and the standby replica.
 
-## Files
-
-*   `docker-compose.yml`: Defines the three services (`laterbase-standby`, `laterbase-backup-agent`, `laterbase-pgadmin`), their configurations, volumes, and network.
-*   `Dockerfile`: Instructions to build the PostgreSQL standby server image (based on `postgres:15`).
-*   `Dockerfile.backup`: Instructions to build the backup agent image (based on Debian, includes `cron` and `postgresql-client`).
-*   `.env`: Configuration file for environment variables (database credentials, pgAdmin login, etc.). **Requires user configuration.**
-*   `setup_standby.sh`: Script run inside the standby container on first start to perform the initial base backup and configure replication.
-*   `backup.sh`: Script run by cron inside the backup agent container to perform hourly `pg_dump` backups.
-*   `crontab.txt`: Defines the cron schedule for `backup.sh`.
-*   `./backups/` (Directory to be created): Host directory where backup files (`.sql.gz`) will be stored by the backup agent.
-
-
 <p align="center">
   <img src="readme/laterbase.gif" alt="Jonson From the Peepshow saying Screw it, Sort it Later Stick it on the Laterbase">
 </p>
+
+
+
 
 
 ## Configuration
@@ -90,3 +81,15 @@ This project, nicknamed "Laterbase", sets up a Docker-based environment specific
     *   Run:
         ```bash
         docker-compose down
+
+## Files
+
+*   `docker-compose.yml`: Defines the three services (`laterbase-standby`, `laterbase-backup-agent`, `laterbase-pgadmin`), their configurations, volumes, and network.
+*   `Dockerfile`: Instructions to build the PostgreSQL standby server image (based on `postgres:15`).
+*   `Dockerfile.backup`: Instructions to build the backup agent image (based on Debian, includes `cron` and `postgresql-client`).
+*   `.env`: Configuration file for environment variables (database credentials, pgAdmin login, etc.). **Requires user configuration.**
+*   `setup_standby.sh`: Script run inside the standby container on first start to perform the initial base backup and configure replication.
+*   `backup.sh`: Script run by cron inside the backup agent container to perform hourly `pg_dump` backups.
+*   `crontab.txt`: Defines the cron schedule for `backup.sh`.
+*   `./backups/` (Directory to be created): Host directory where backup files (`.sql.gz`) will be stored by the backup agent.
+

@@ -51,9 +51,16 @@ services:
       # Optional: Define these in .env if different from defaults in backup.sh
       # PRIMARY_PORT: ${PRIMARY_PORT:-5432}
       # PRIMARY_USER: ${PRIMARY_USER:-postgres}
+      # --- Rclone & Retention Configuration (Define in .env) ---
+      RCLONE_REMOTE_NAME: ${RCLONE_REMOTE_NAME:-} # e.g., mygdrive
+      RCLONE_REMOTE_PATH: ${RCLONE_REMOTE_PATH:-} # e.g., resolve_backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7} # Default 7 days
     volumes:
       # Mount a local directory on the host to store the backups
       - ./backups:/backups
+      # Mount a local directory containing rclone.conf
+      # Create ./rclone_config directory and place your rclone.conf file there
+      - ./rclone_config:/config:ro # Mount read-only for security
     restart: unless-stopped
     networks:
       - laterbase_net

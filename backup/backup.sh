@@ -12,6 +12,13 @@ DB_USER="${PRIMARY_USER:-postgres}"
 DB_NAME="${PRIMARY_DB}" # This needs to be the actual Resolve DB name
 # PGPASSWORD should be set as an environment variable in docker-compose
 
+# Rclone Configuration (Set these in docker-compose/.env)
+RCLONE_REMOTE_NAME="${RCLONE_REMOTE_NAME}" # e.g., mygdrive
+RCLONE_REMOTE_PATH="${RCLONE_REMOTE_PATH}" # e.g., resolve_backups
+
+# Backup Retention (Set in docker-compose/.env, defaults to 7 days)
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+
 BACKUP_DIR="/backups"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_FILENAME="${DB_NAME}_backup_${TIMESTAMP}.sql.gz"
@@ -29,6 +36,14 @@ fi
 if [ -z "$PGPASSWORD" ]; then
   echo "$(date): Error: PGPASSWORD environment variable is not set." >> /var/log/cron.log
   exit 1
+fi
+if [ -z "$RCLONE_REMOTE_NAME" ]; then
+  echo "$(date): Warning: RCLONE_REMOTE_NAME is not set. Backup will not be uploaded." >> /var/log/cron.log
+  # Decide if this should be a fatal error (exit 1) or just a warning
+fi
+if [ -z "$RCLONE_REMOTE_PATH" ]; then
+  echo "$(date): Warning: RCLONE_REMOTE_PATH is not set. Backup will not be uploaded." >> /var/log/cron.log
+  # Decide if this should be a fatal error (exit 1) or just a warning
 fi
 
 # --- Backup Execution ---
@@ -52,9 +67,24 @@ else
   exit 1
 fi
 
-# --- Optional: Cleanup old backups (e.g., keep last 7 days) ---
-# echo "$(date): Cleaning up backups older than 7 days..." >> /var/log/cron.log
-# find "$BACKUP_DIR" -name "${DB_NAME}_backup_*.sql.gz" -type f -mtime +7 -delete
+# --- Rclone Upload ---
+if [ -n "$RCLONE_REMOTE_NAME" ] && [ -n "$RCLONE_REMOTE_PATH" ]; then
+  RCLONE_DESTINATION="${RCLONE_REMOTE_NAME}:${RCLONE_REMOTE_PATH}"
+  echo "$(date): Uploading backup to ${RCLONE_DESTINATION}..." >> /var/log/cron.log
+  rclone copy "$BACKUP_PATH" "$RCLONE_DESTINATION" --config /config/rclone.conf --log-file /var/log/cron.log --log-level INFO
+  if [ $? -eq 0 ]; then
+    echo "$(date): Upload successful: ${BACKUP_FILENAME} to ${RCLONE_DESTINATION}" >> /var/log/cron.log
+  else
+    echo "$(date): Error: Upload failed for ${BACKUP_FILENAME} to ${RCLONE_DESTINATION}." >> /var/log/cron.log
+    # Decide if upload failure should be fatal (exit 1) or just logged
+  fi
+else
+   echo "$(date): Skipping rclone upload as RCLONE_REMOTE_NAME or RCLONE_REMOTE_PATH is not set." >> /var/log/cron.log
+fi
+
+# --- Local Cleanup ---
+echo "$(date): Cleaning up local backups older than ${BACKUP_RETENTION_DAYS} days in ${BACKUP_DIR}..." >> /var/log/cron.log
+find "$BACKUP_DIR" -name "${DB_NAME}_backup_*.sql.gz" -type f -mtime "+${BACKUP_RETENTION_DAYS}" -print -delete >> /var/log/cron.log 2>&1
 
 echo "$(date): Backup process finished." >> /var/log/cron.log
 

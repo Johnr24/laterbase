@@ -5,10 +5,12 @@ FROM debian:bullseye-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     postgresql-client \
+    rclone \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directory for backup scripts and backups
-RUN mkdir -p /etc/cron.d /app /backups
+RUN mkdir -p /etc/cron.d /app /backups /config
 
 # Copy the backup script and crontab
 COPY backup.sh /app/backup.sh

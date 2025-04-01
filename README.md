@@ -3,7 +3,10 @@
 Laterbase, sets up a Docker-based environment specifically designed for **DaVinci Resolve PostgreSQL databases**. It consists of:
 
 1.  **PostgreSQL Standby Server:** Creates a hot standby replica of your primary DaVinci Resolve PostgreSQL database using streaming replication.
-2.  **Hourly Backup Agent:** Performs hourly logical backups (`pg_dump`) of your primary DaVinci Resolve database, optionally uploads them to cloud storage using `rclone`, and manages local backup retention.
+2.  **Hourly Backup Agent (`backup-agent`):** Performs hourly logical backups (`pg_dump`) of your primary DaVinci Resolve database(s) into a shared volume (`/backups`). Manages local `.sql.gz` file retention based on `BACKUP_RETENTION_DAYS`. Triggered by the `scheduler` service.
+3.  **Duplicati Service (`duplicati`):** Runs the Duplicati server, monitoring the shared `/backups` volume (read-only). Uploads new/changed backup files to your configured cloud storage destination and manages remote retention according to its own job settings. Configured via its web UI.
+4.  **pgAdmin 4 UI (`pgadmin`):** Provides a web-based graphical interface for managing and monitoring both the primary DaVinci Resolve database and the standby replica.
+5.  **Scheduler (`scheduler`):** Uses Ofelia to trigger the `backup.sh` script inside the `backup-agent` container on an hourly schedule.
 3.  **pgAdmin 4 UI:** Provides a web-based graphical interface for managing and monitoring both the primary DaVinci Resolve database and the standby replica.
 
 <p align="center">
@@ -23,22 +26,26 @@ graph TD
     end
 
     subgraph "Laterbase (Docker Host)"
-        StandbyDB[("laterbase-standby<br>PostgreSQL Standby")]
-        BackupAgent["laterbase-backup-agent<br>(Hourly pg_dump, rclone upload, retention)"]
-        PgAdminUI[("laterbase-pgadmin<br>pgAdmin 4 UI")]
-        BackupVolume["Local Backups backups"]
-        RcloneConfigVolume[Rclone Config<br>./rclone_config<br>(Dynamically Generated)]
+        StandbyDB[("standby<br>PostgreSQL Standby")]
+        BackupAgent["backup-agent<br>(Hourly pg_dump)"]
+        DuplicatiService[("duplicati<br>Duplicati Server")]
+        PgAdminUI[("pgadmin<br>pgAdmin 4 UI")]
+        Scheduler["scheduler<br>(Ofelia - Runs pg_dump)"]
+        BackupVolume["Local Backups Volume<br>(./backups mapped to /backups)"]
+        DuplicatiDataVolume["Duplicati Data Volume<br>(duplicati_data mapped to /data)"]
     end
 
-    subgraph "Cloud Storage (Optional)"
-        CloudBackup{{Rclone Remote<br>e.g., S3, Google Drive}}
+    subgraph "Cloud Storage"
+        CloudDestination{{Duplicati Destination<br>e.g., S3, Google Drive, B2}}
     end
 
     PrimaryDB -- Streaming Replication --> StandbyDB
-    PrimaryDB -- pg_dump --> BackupAgent
+    Scheduler -- Triggers --> BackupAgent(Run backup.sh)
+    BackupAgent -- pg_dump --> PrimaryDB
     BackupAgent -- Writes .sql.gz --> BackupVolume
-    BackupAgent -- Copies .sql.gz --> CloudBackup
-    BackupAgent -- Reads Config --> RcloneConfigVolume
+    DuplicatiService -- Reads .sql.gz --> BackupVolume
+    DuplicatiService -- Uploads --> CloudDestination
+    DuplicatiService -- Reads/Writes --> DuplicatiDataVolume
     PgAdminUI -- User Connects --> PrimaryDB
     PgAdminUI -- User Connects --> StandbyDB
     StandbyDB -- Uses --> ReplicationSlot
@@ -46,11 +53,13 @@ graph TD
     style PrimaryDB fill:#071782,stroke:#333,stroke-width:2px
     style StandbyDB fill:#374ac4,stroke:#333,stroke-width:2px
     style BackupAgent fill:#6b0b9e,stroke:#333,stroke-width:2px
+    style DuplicatiService fill:#d97e0f,stroke:#333,stroke-width:2px
     style PgAdminUI fill:#0b9e92,stroke:#333,stroke-width:2px
+    style Scheduler fill:#b5651d,stroke:#333,stroke-width:1px
     style ReplicationSlot fill:#359e0b,stroke:#333,stroke-width:1px
     style BackupVolume fill:#9e8f0b,stroke:#333,stroke-width:1px
-    style RcloneConfigVolume fill:#b0a01c,stroke:#333,stroke-width:1px
-    style CloudBackup fill:#1caab0,stroke:#333,stroke-width:2px
+    style DuplicatiDataVolume fill:#b0a01c,stroke:#333,stroke-width:1px
+    style CloudDestination fill:#1caab0,stroke:#333,stroke-width:2px
 ```
 
 **Note on Physical Replication Slot:** A physical replication slot (`laterbase_standby_slot` in this setup) is a feature on the primary PostgreSQL server. It ensures that the primary server retains the necessary transaction logs (WAL segments) required by the standby server, even if the standby disconnects temporarily. This prevents the standby from falling too far behind and needing a full resynchronization.
@@ -60,22 +69,17 @@ graph TD
     *   Open the `.env` file.
     *   Set `PRIMARY_HOST` to the hostname or IP address of your main **DaVinci Resolve** PostgreSQL server.
     *   Set `REPL_PASSWORD` to the password for the `postgres` user (or your designated replication user) on the primary DaVinci Resolve server.
-    *   **Crucially:** Replace `YOUR_LATERBASE_PRIMARY_DB_NAME_HERE` with the **actual name** of your main **DaVinci Resolve** database on the primary server (e.g., `ResolveProjects`, for backups).
-    *   Replace `YOUR_PGADMIN_EMAIL_HERE` with the email address you want to use for the pgAdmin login.
-    *   Replace `YOUR_PGADMIN_PASSWORD_HERE` with the password you want for the pgAdmin login.
+    *   **Crucially:** Set `PRIMARY_DBS` to a comma-separated list of the **actual names** of your main **DaVinci Resolve** database(s) on the primary server (e.g., `ResolveProjects`, `AnotherResolveDB`).
+    *   Set `PGADMIN_EMAIL` to the email address you want to use for the pgAdmin login.
+    *   Set `PGADMIN_PASSWORD` to the password you want for the pgAdmin login.
     *   Adjust `PRIMARY_PORT` or `PRIMARY_USER` if they differ from the defaults (5432, postgres).
     *   Optionally, uncomment and set `POSTGRES_USER`, `POSTGRES_DB`, or `PGDATA` under the "Standby Server Configuration" section to override the defaults used by the standby service.
-    *   **Backup Agent - Active Rclone Destination (Optional):**
-        *   Set `RCLONE_REMOTE_NAME` to the name of the rclone remote you want the backup agent to **use** for uploads (e.g., `my_google_drive_backup`, `my_s3_backup`). This remote must be defined either dynamically (see next section) or manually in `./rclone_config/rclone.conf`. Leave blank to disable cloud uploads.
-        *   Set `RCLONE_REMOTE_PATH` to the directory path within the *active* rclone remote where backups should be stored (e.g., `resolve_backups/production`). Leave blank if `RCLONE_REMOTE_NAME` is blank.
-    *   **Backup Agent - Dynamic Rclone Remote Configuration (Optional):**
-        *   Instead of manually creating `./rclone_config/rclone.conf`, you can define remotes directly in the `.env` file using a specific format. The backup agent's entrypoint script will automatically create the necessary configuration inside the container when it starts.
-        *   Use the `RCLONE_REMOTE_<N>_...` variables as shown in `.env.example` (where `N` is a number starting from 1).
-        *   Define `RCLONE_REMOTE_<N>_NAME` (e.g., `my_s3_backup`) and `RCLONE_REMOTE_<N>_TYPE` (e.g., `s3`).
-        *   Add provider-specific parameters using `RCLONE_REMOTE_<N>_PARAM_<KEY>` (e.g., `RCLONE_REMOTE_1_PARAM_ACCESS_KEY_ID=...`). The `<KEY>` should be the lowercase version of the parameter name rclone expects (e.g., `access_key_id`, `secret_access_key`, `service_account_credentials`). Refer to `rclone config create --help` or the rclone documentation for specific provider parameters.
-        *   See `.env.example` for detailed examples for Google Drive, S3, B2, etc.
-    *   **Backup Retention (Optional):**
-        *   Set `BACKUP_RETENTION_DAYS` to the number of days you want to keep local backups in the `./backups` directory. Defaults to 7 if not set.
+    *   **Backup Agent & Duplicati Configuration:**
+        *   Set `LOCAL_BACKUP_PATH` to the path on the host machine where the hourly `.sql.gz` backup files should be stored (default: `./backups`). This directory is mounted into both the `backup-agent` (writeable) and `duplicati` (read-only) containers as `/backups`.
+        *   Set `BACKUP_RETENTION_DAYS` to the number of days you want to keep local `.sql.gz` backups in the `LOCAL_BACKUP_PATH` directory. This cleanup is done by the `backup.sh` script (run by the scheduler). Defaults to 7 if not set.
+        *   Set `TZ` to the desired timezone for the Duplicati container (e.g., `Europe/London`, `America/New_York`, `Etc/UTC`).
+        *   Optionally, uncomment and set `DUPLICATI_WEBSERVICE_PASSWORD` to password-protect the Duplicati Web UI.
+        *   **Duplicati Job Configuration:** Cloud destination, remote retention, and schedule are configured via the Duplicati Web UI after starting the containers (see Usage section).
 
 2.  **Primary PostgreSQL Server Preparation (`PRIMARY_HOST`):**
 
@@ -126,32 +130,12 @@ graph TD
             *   After reloading/restarting, ensure your primary PostgreSQL server (and the DaVinci Resolve Project Server application, if used) is running and accessible before proceeding to start the Laterbase services.
 
 3.  **Create Backup Directory:**
-    *   In the same directory as the `docker-compose.yml` file on your Docker host, create the backups directory:
+    *   In the same directory as the `docker-compose.yml` file on your Docker host, create the backups directory (if using the default `LOCAL_BACKUP_PATH`):
         ```bash
         mkdir backups
         ```
 
-4.  **Rclone Configuration (Optional - Choose One Method):**
-
-    *   **Method A: Dynamic Configuration via `.env` (Recommended)**
-        *   Define your desired rclone remotes directly in the `.env` file using the `RCLONE_REMOTE_<N>_...` variables as described in the `.env` File section above and shown in `.env.example`.
-        *   The `laterbase-backup-agent` container will automatically generate the necessary `/config/rclone.conf` file internally when it starts based on these environment variables.
-        *   You still need to create the host directory for persistence, although the file inside will be managed by the container:
-            ```bash
-            mkdir rclone_config
-            ```
-        *   Ensure the `RCLONE_REMOTE_NAME` variable in `.env` matches one of the `RCLONE_REMOTE_<N>_NAME` values you defined.
-
-    *   **Method B: Manual `rclone.conf` File**
-        *   If you prefer to manage the `rclone.conf` file manually or have complex configurations not easily represented by environment variables:
-        *   Create the directory:
-            ```bash
-            mkdir rclone_config
-            ```
-        *   Place your fully configured `rclone.conf` file inside `./rclone_config/`.
-        *   **Important:** If using this method, **do not** set any `RCLONE_REMOTE_<N>_...` variables in your `.env` file, as the entrypoint script might overwrite or conflict with your manual configuration.
-        *   Ensure the remote name you want to use matches the `RCLONE_REMOTE_NAME` set in your `.env` file.
-        *   **Security Note:** The `rclone.conf` file contains sensitive credentials. Ensure appropriate file permissions are set on the host machine (`chmod 600 ./rclone_config/rclone.conf`).
+4.  **(Removed)** Rclone configuration is no longer needed. Duplicati is configured via its Web UI.
 
 ## Usage
 
@@ -162,20 +146,32 @@ graph TD
         docker-compose up --build -d
         ```
 2.  **Access pgAdmin:**
-    *   Open a web browser and go to `http://<your-docker-host-ip>:5050` (or `http://localhost:5050` if running Docker locally).
-    *   Log in using the email and password you configured in the `.env` file.
-3.  **Connect Servers in pgAdmin:**
+    *   Open `http://<your-docker-host-ip>:5050` (or `http://localhost:5050`).
+    *   Log in using the email/password from `.env`.
+3.  **Access Duplicati:**
+    *   Open `http://<your-docker-host-ip>:8200` (or `http://localhost:8200`).
+    *   If you set `DUPLICATI_WEBSERVICE_PASSWORD` in `.env`, you'll need to log in.
+4.  **Configure Duplicati Backup Job:**
+    *   In the Duplicati UI (port 8200), click "Add backup".
+    *   Choose "Configure a new backup" and give it a name (e.g., "Resolve DB Backups"). Set an encryption passphrase (recommended!).
+    *   **Destination:** Select your cloud storage provider (Google Drive, S3, B2, etc.) and enter the required bucket/path and authentication details.
+    *   **Source Data:** Navigate the folder tree and select the `/backups` directory (this is where `backup.sh` places the `.sql.gz` files inside the container).
+    *   **Schedule:** Set how often Duplicati should check for new files and upload them (e.g., "Run daily at 3:00 AM"). Note that `backup.sh` creates new `.sql.gz` files hourly via the Ofelia scheduler. Duplicati will upload any new files found since its last run.
+    *   **Options:** Configure remote retention (e.g., keep daily backups for 30 days). This is separate from the local `.sql.gz` retention (`BACKUP_RETENTION_DAYS` in `.env`).
+    *   Save the backup job configuration. You can run it manually the first time if desired.
+5.  **Connect Servers in pgAdmin:**
     *   Add a server connection for your **Primary** database (`PRIMARY_HOST`:5432). Use the user/password defined in `.env`.
     *   Add a server connection for your **Standby** database. Use these settings:
-        *   **Host name/address:** `laterbase-standby` (the service name)
+        *   **Host name/address:** `standby` (the service name in `docker-compose.yml`)
         *   **Port:** `5432` (the internal port)
         *   **Username:** `postgres` (or `PRIMARY_USER` from `.env`)
-        *   **Password:** Use the *primary* server's password (likely `REPL_PASSWORD` from `.env`).
-4.  **Monitor:**
-    *   Use pgAdmin to monitor server status and replication lag (see pgAdmin documentation or previous conversation notes for specific queries like `pg_stat_replication`).
-    *   Check the `./backups` directory on the host for hourly `.sql.gz` backup files.
-    *   Check container logs using `docker logs laterbase-standby` and `docker logs laterbase-backup-agent`.
-5.  **Stop Containers:**
+        *   **Password:** Use the *primary* server's password (`REPL_PASSWORD` from `.env`).
+6.  **Monitor:**
+    *   Use pgAdmin to monitor server status and replication lag.
+    *   Check the Duplicati UI (port 8200) for backup job status, logs, and restore options.
+    *   Check the `./backups` directory (or `LOCAL_BACKUP_PATH` from `.env`) on the host for hourly `.sql.gz` backup files.
+    *   Check container logs: `docker logs standby`, `docker logs backup-agent`, `docker logs pgadmin`, `docker logs scheduler`.
+7.  **Stop Containers:**
     *   Run:
         ```bash
         docker-compose down
@@ -183,14 +179,13 @@ graph TD
 
 ## Files
 
-*   `docker-compose.yml`: Defines the three services (`laterbase-standby`, `laterbase-backup-agent`, `laterbase-pgadmin`), their configurations, volumes, and network.
+*   `docker-compose.yml`: Defines the services (`standby`, `backup-agent`, `duplicati`, `pgadmin`, `scheduler`), their configurations, volumes, and network.
 *   `app/Dockerfile`: Instructions to build the PostgreSQL standby server image (based on `postgres:15`).
-*   `backup/Dockerfile.backup`: Instructions to build the backup agent image (based on Debian, includes `cron`, `rclone`, and `postgresql-client`).
+*   `backup/Dockerfile.backup`: Instructions to build the `backup-agent` image (based on Debian, includes only `postgresql-client`).
 *   `.env`: Configuration file for environment variables (database credentials, pgAdmin login, etc.). **Requires user configuration.**
 *   `app/prepare_primary_db.sh`: **(New)** Script to automate granting replication role and creating the replication slot on the primary server via `psql`. Run manually before starting services.
 *   `app/setup_standby.sh`: Script run inside the standby container on first start to perform the initial base backup and configure replication.
-*   `backup/backup.sh`: Script run by cron inside the backup agent container to perform hourly `pg_dump` backups, optionally upload via rclone, and manage retention.
-*   `backup/entrypoint.sh`: Entrypoint for backup container. Dynamically configures rclone based on `RCLONE_REMOTE_<N>_...` environment variables (if present) before starting the cron daemon (managed by Ofelia).
-*   `backup/crontab.txt`: Defines the cron schedule for `backup.sh`.
-*   `./backups/` (Directory to be created): Host directory where local backup files (`.sql.gz`) will be stored by the backup agent.
-*   `./rclone_config/` (Directory to be created, optional): Host directory containing the `rclone.conf` file for cloud uploads.
+*   `backup/backup.sh`: Script run hourly (via Ofelia scheduler) inside the backup agent container to perform `pg_dump` backups into the `/backups` volume and manage local `.sql.gz` file retention.
+*   `backup/entrypoint.sh`: (Removed/Unused) No longer needed for the simplified `backup-agent`.
+*   `./backups/` (Directory to be created, or path set in `LOCAL_BACKUP_PATH`): Host directory where local backup files (`.sql.gz`) are stored by `backup-agent` and read by `duplicati`.
+*   `duplicati_data` (Docker Volume): Stores Duplicati's configuration database and local state.

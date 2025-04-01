@@ -1,29 +1,25 @@
-# Use a slim Debian image as a base, as we only need client tools
+# Use a slim Debian image as a base, only needs pg_dump
 FROM debian:bullseye-slim
 
-# Install postgresql-client (which includes pg_dump) and rclone
+# Install only postgresql-client (which includes pg_dump)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
-    rclone \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create directory for backup scripts and backups
-RUN mkdir -p /app /backups /config
+# Create directory for backup script
+# /backups will be created by the volume mount
+RUN mkdir -p /app
 
-# Copy the backup script and crontab
+# Copy only the backup script
 COPY backup.sh /app/backup.sh
-# COPY crontab.txt /etc/cron.d/backup-cron # Removed, cron is not used
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# Entrypoint script is no longer needed for this container
 
-# Make scripts executable
-RUN chmod +x /app/backup.sh /usr/local/bin/entrypoint.sh
-# Removed chmod for crontab and mkdir for /var/log
+# Make script executable
+RUN chmod +x /app/backup.sh
 
 # Set working directory
 WORKDIR /app
 
-# ENTRYPOINT is removed. The entrypoint script will be run manually or by scheduler if needed.
-
-# Keep the container running idly so the scheduler can exec into it
+# Keep the container running idly so the scheduler (Ofelia) can exec into it
 CMD ["tail", "-f", "/dev/null"]

@@ -2,11 +2,11 @@
 
 services:
   # --- Standby Replication Service ---
-  laterbase-standby:
+  standby:
     build:
       context: ./app # Updated context
       dockerfile: Dockerfile # Use the main Dockerfile (relative to context)
-    container_name: laterbase_standby
+    container_name: standby
     env_file:
       - .env
     environment:
@@ -14,79 +14,87 @@ services:
       PRIMARY_HOST: ${PRIMARY_HOST}
       REPL_PASSWORD: ${REPL_PASSWORD}
       # --- PostgreSQL Runtime Configuration (sourced from .env, with defaults) ---
-      # User that the PostgreSQL server runs as and owns the data directory
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      # Placeholder database name created on init (actual data comes from primary)
       POSTGRES_DB: ${POSTGRES_DB:-laterbase_standby_db}
-      # Path inside the container where PostgreSQL data is stored
       PGDATA: ${PGDATA:-/var/lib/postgresql/data/pgdata}
-      # Required by base image entrypoint when initializing an empty PGDATA
-      POSTGRES_PASSWORD: ${REPL_PASSWORD}
-
+      POSTGRES_PASSWORD: ${REPL_PASSWORD} # Required by base image entrypoint
       # --- Other Settings ---
       POSTGRES_INITDB_ARGS: "--no-sync" # Faster init, safe for initial setup
     volumes:
-      # Mount a persistent volume for the standby database data
-      # The target path MUST match the PGDATA environment variable
       - laterbase_standby_data:${PGDATA:-/var/lib/postgresql/data/pgdata}
     ports:
-      # Map standby's internal port 5432 to host port 5433
       - "5433:5432"
     restart: unless-stopped
     networks:
       - network
 
-  # --- Hourly Backup Agent Service ---
-  laterbase-backup-agent:
+  # --- Hourly Backup Agent Service (Executes pg_dump) ---
+  backup-agent:
     build:
-      context: ./backup # Updated context
-      dockerfile: Dockerfile.backup # Use the backup Dockerfile (relative to context)
-    container_name: laterbase_backup_agent
+      context: ./backup
+      dockerfile: Dockerfile.backup # Use the reverted backup Dockerfile
+    container_name: backup_agent
     env_file:
       - .env
     environment:
       # Required by backup.sh:
       PRIMARY_HOST: ${PRIMARY_HOST}
       PGPASSWORD: ${REPL_PASSWORD} # backup.sh expects PGPASSWORD
-      PRIMARY_DB: ${PRIMARY_DB:-YOUR_RESOLVE_DB_NAME_HERE} # Add PRIMARY_DB to .env!
+      PRIMARY_DBS: ${PRIMARY_DBS:-YOUR_RESOLVE_DB_NAMES_HERE} # Add PRIMARY_DBS to .env!
       PRIMARY_PORT: ${PRIMARY_PORT:-5432}
       PRIMARY_USER: ${PRIMARY_USER:-postgres}
-      RCLONE_REMOTE_NAME: ${RCLONE_REMOTE_NAME:-} # e.g., mygdrive
-      RCLONE_REMOTE_PATH: ${RCLONE_REMOTE_PATH:-} # e.g., resolve_backups
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7} # Default 7 days
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7} # Default 7 days for local .sql.gz files
     volumes:
-      # Mount a local directory on the host to store the backups
-      - ./backups:/backups
-      - ./rclone_config:/config # Allow writing for dynamic config
+      # Mount host directory for pg_dump files (destination for backup.sh)
+      - ${LOCAL_BACKUP_PATH:-./backups}:/backups
     restart: unless-stopped
     labels:
       ofelia.enabled: "true"
       # Schedule backup script execution
       ofelia.job-exec.laterbase-backup.schedule: "@hourly" # Or use cron format e.g., "0 * * * *"
-      ofelia.job-exec.laterbase-backup.container: "laterbase_backup_agent"
-      ofelia.job-exec.laterbase-backup.command: "/app/backup.sh"
-      # Schedule entrypoint script execution on startup for dynamic config
-      ofelia.job-exec.laterbase-config.schedule: "@reboot"
-      ofelia.job-exec.laterbase-config.container: "laterbase_backup_agent"
-      ofelia.job-exec.laterbase-config.command: "/usr/local/bin/entrypoint.sh"
+      ofelia.job-exec.laterbase-backup.container: "backup_agent"
+      ofelia.job-exec.laterbase-backup.command: "/app/backup.sh" # Ofelia runs the dump script
+    networks:
+      - network
+
+  # --- Duplicati Backup Service ---
+  duplicati:
+    image: duplicati/duplicati:latest # Use the official image
+    container_name: laterbase_duplicati
+    hostname: laterbase-duplicati # Set hostname for UI clarity
+    env_file: # Pass .env for optional password
+      - .env
+    environment:
+      - TZ=${TZ:-Etc/UTC} # Optional: Set timezone
+      # Optional: Set password via DUPLICATI_WEBSERVICE_PASSWORD if needed in .env
+      # Ensure the variable is present in .env if you uncomment this
+      # DUPLICATI_WEBSERVICE_PASSWORD: ${DUPLICATI_WEBSERVICE_PASSWORD}
+    volumes:
+      # Mount volume for Duplicati configuration database and local state
+      - duplicati_data:/data
+      # Mount the shared backups directory (read-only for Duplicati)
+      - ${LOCAL_BACKUP_PATH:-./backups}:/backups:ro
+      # Optional: Mount source data if Duplicati needs to back up other things directly
+      # - /path/on/host:/source
+    ports:
+      - "8201:8200" # Duplicati Web UI
+    restart: unless-stopped
     networks:
       - network
 
   # --- pgAdmin UI Service ---
-  laterbase-pgadmin:
+  pgadmin:
     image: dpage/pgadmin4:latest
     container_name: laterbase_pgadmin
+    env_file:
+      - .env # To get PGADMIN_EMAIL/PASSWORD
     environment:
-      # Set these in your .env file or replace placeholders here
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-YOUR_PGADMIN_EMAIL_HERE}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-YOUR_PGADMIN_PASSWORD_HERE}
       PGADMIN_LISTEN_PORT: 80
     ports:
-      # Map host port 5050 to pgAdmin container port 80
       - "5050:80"
     volumes:
-      # Persist pgAdmin configuration and server definitions
-      # Persist pgAdmin configuration and server definitions using a named volume
       - laterbase_pgadmin_data:/var/lib/pgadmin
     networks:
       - network
@@ -97,7 +105,8 @@ services:
     image: mcuadros/ofelia:latest
     container_name: laterbase_scheduler
     depends_on:
-      - laterbase-backup-agent # Ensure backup agent container exists
+      - backup-agent # Ensure backup agent container exists for Ofelia to exec into
+      # No explicit dependency on duplicati service needed for scheduler operation
     command: daemon --docker
     volumes:
       # Mount docker socket to allow Ofelia to interact with Docker daemon
@@ -112,6 +121,9 @@ volumes:
     driver: local
   # Volume for pgAdmin data
   laterbase_pgadmin_data:
+    driver: local
+  # Volume for Duplicati configuration and state
+  duplicati_data:
     driver: local
 
 networks:

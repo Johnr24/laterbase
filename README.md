@@ -65,69 +65,44 @@ graph TD
 **Note on Physical Replication Slot:** A physical replication slot (`laterbase_standby_slot` in this setup) is a feature on the primary PostgreSQL server. It ensures that the primary server retains the necessary transaction logs (WAL segments) required by the standby server, even if the standby disconnects temporarily. This prevents the standby from falling too far behind and needing a full resynchronization.
 
 ## Configuration
-1.  **`.env` File:**
-    *   Open the `.env` file.
-    *   Set `PRIMARY_HOST` to the hostname or IP address of your main **DaVinci Resolve** PostgreSQL server.
-    *   Set `REPL_PASSWORD` to the password for the `postgres` user (or your designated replication user) on the primary DaVinci Resolve server.
-    *   **Crucially:** Set `PRIMARY_DBS` to a comma-separated list of the **actual names** of your main **DaVinci Resolve** database(s) on the primary server (e.g., `ResolveProjects`, `AnotherResolveDB`).
-    *   Set `PGADMIN_EMAIL` to the email address you want to use for the pgAdmin login.
-    *   Set `PGADMIN_PASSWORD` to the password you want for the pgAdmin login.
-    *   Adjust `PRIMARY_PORT` or `PRIMARY_USER` if they differ from the defaults (5432, postgres).
-    *   Optionally, uncomment and set `POSTGRES_USER`, `POSTGRES_DB`, or `PGDATA` under the "Standby Server Configuration" section to override the defaults used by the standby service.
-    *   **Backup Agent & Duplicati Configuration:**
-        *   Set `LOCAL_BACKUP_PATH` to the path on the host machine where the hourly `.sql.gz` backup files should be stored (default: `./backups`). This directory is mounted into both the `backup-agent` (writeable) and `duplicati` (read-only) containers as `/backups`.
-        *   Set `BACKUP_RETENTION_DAYS` to the number of days you want to keep local `.sql.gz` backups in the `LOCAL_BACKUP_PATH` directory. This cleanup is done by the `backup.sh` script (run by the scheduler). Defaults to 7 if not set.
-        *   Set `TZ` to the desired timezone for the Duplicati container (e.g., `Europe/London`, `America/New_York`, `Etc/UTC`).
-        *   Optionally, uncomment and set `DUPLICATI_WEBSERVICE_PASSWORD` to password-protect the Duplicati Web UI.
-        *   **Duplicati Job Configuration:** Cloud destination, remote retention, and schedule are configured via the Duplicati Web UI after starting the containers (see Usage section).
+1.  **Configure `.env` File:**
+    *   Copy the `.env.example` file to `.env`.
+    *   Edit the `.env` file and fill in the required values (database connection details, pgAdmin credentials, backup settings) according to the comments within the file.
 
 2.  **Primary PostgreSQL Server Preparation (`PRIMARY_HOST`):**
 
     *   **Ensure DaVinci Resolve Database is Accessible:** Make sure your DaVinci Resolve database is configured to allow network connections if Laterbase is running on a different machine. Check the DaVinci Resolve Project Server settings if applicable.
     *   **Primary Server Configuration Steps (macOS Example):**
-        **VERY IMPORTANT:** Configuring the primary server involves **both** manual file editing and running an automated script. These steps **must** be completed on your **primary macOS server** (`PRIMARY_HOST`) *before* you attempt to start the main Laterbase Docker containers (`docker-compose up`). Laterbase only configures the standby replica; it does **not** automatically configure your primary server.
+        **VERY IMPORTANT:** Configuring the primary server involves both manual file editing and running an automated script. These steps must be completed on your primary macOS (this is usually the machine your resolve is on) (`PRIMARY_HOST`) *before* you attempt to start the main Laterbase Docker containers (`docker-compose up`). Laterbase only configures the standby replica; it does **not** automatically configure your primary server.
 
-        **Step 1: Manually Edit `pg_hba.conf` (Requires `sudo` on Primary Server)**
-            *   This step **must** be done manually on the primary server.
-            *   Open `Terminal.app` on the primary Mac where DaVinci Resolve's PostgreSQL is running.
-            *   **Find the `pg_hba.conf` file:** For a standard DaVinci Resolve installation on macOS, the path is usually:
-                `/Library/Application Support/PostgreSQL/<VERSION>/data/pg_hba.conf`
-                (Replace `<VERSION>` with your PostgreSQL version number, e.g., `13`. You can find it by running `ls "/Library/Application Support/PostgreSQL/"` in Terminal).
-            *   **Edit the file:** Use `nano` with `sudo`:
+        **Step 1: Edit Primary Server's `pg_hba.conf` (Manual Step on Primary)**
+            *   On the primary Mac (where DaVinci Resolve's PostgreSQL runs), open Terminal and run the following command. Replace `<VERSION>` with your PostgreSQL version (e.g., 13):
                 ```bash
-                sudo nano "/Library/Application Support/PostgreSQL/<VERSION>/data/pg_hba.conf"
+                sudo nano /Library/PostgreSQL/<VERSION>/data/pg_hba.conf
                 ```
-                (Again, replace `<VERSION>` with the correct number).
-            *   **Add the replication line:** Add the following line to the end of the file. **Adjust the IP address/subnet (`192.168.1.0/24`)** to match the network of your Docker host running Laterbase, allowing it to connect. Use the correct `PRIMARY_USER` if it's not `postgres`.
-                ```
+            *   Add the following line at the end of the file. **Important:** Replace `192.168.1.123/32` with the actual IP address of your Laterbase Docker host. Use the correct `PRIMARY_USER` if it's not `postgres`.
+                ```conf
                 # Allow replication connections from the Laterbase Docker host
-                host    replication     postgres        192.168.1.0/24         md5
+                host    replication     postgres        192.168.1.123/32         md5
                 ```
-            *   **Save and Exit:** Press `Ctrl+O`, then `Enter` to save. Press `Ctrl+X` to exit `nano`.
+            *   Save the file (`Ctrl+O`, Enter) and exit (`Ctrl+X`).
 
-        **Step 2: Run the Preparation Script (Requires Docker & `.env` on Laterbase Host)**
-            *   This script automates granting replication privileges, creating the replication slot, and attempting a configuration reload via SQL.
-            *   Ensure your `.env` file in the Laterbase project directory is correctly configured with `PRIMARY_HOST`, `PRIMARY_PORT`, `PRIMARY_USER`, and `REPL_PASSWORD`.
-            *   From the Laterbase project directory (where `docker-compose.yml` is), run the script using `docker-compose run`:
+        **Step 2: Prepare Primary Database (Run Script on Laterbase Host)**
+            *   This script prepares the primary database by granting permissions and creating the necessary replication slot (`laterbase_standby_slot`).
+            *   Ensure your `.env` file in the Laterbase project directory is correctly configured (especially `PRIMARY_HOST`, `PRIMARY_USER`, `REPL_PASSWORD`).
+            *   From the Laterbase project directory (where `docker-compose.yml` is), run this command:
                 ```bash
                 docker-compose run --rm --no-deps app bash /app/prepare_primary_db.sh
                 ```
-                *   `--rm`: Removes the temporary container after execution.
-                *   `--no-deps`: Prevents starting linked services (like the standby DB itself).
-                *   `app`: The service name defined in `docker-compose.yml` that has `psql` and the script.
-            *   The script uses the `REPL_PASSWORD` from your `.env` file to connect.
-            *   Review the script's output for any errors (e.g., connection refused, authentication failed).
+            *   Check the output for any errors. If this script fails, replication will not work.
 
-        **Step 3: Manually Reload/Restart Primary PostgreSQL Server (on Primary Server)**
-            *   **Crucial:** Changes to `pg_hba.conf` (Step 1) require the primary PostgreSQL server configuration to be reloaded or the server restarted. The script (Step 2) attempts `SELECT pg_reload_conf();`, but this **may not be sufficient** for `pg_hba.conf` changes or might fail due to permissions.
-            *   You **must** ensure the configuration is reloaded on the primary server. Choose **one** of the following methods on the primary Mac:
-
-                *   **Method A (Full Server Restart - Use if unsure):** If methods A or B don't work or you're unsure, a full restart of the Mac hosting the primary database will ensure the changes are applied, although it's less ideal.
-
-                *   **Method B ** Quit and restart the **DaVinci Resolve Project Server** application. This usually restarts the underlying PostgreSQL server gracefully.
+        **Step 3: Reload Primary Server Config (Manual Step on Primary)**
+            *   After editing `pg_hba.conf` (Step 1), the primary PostgreSQL server needs to reload its configuration.
+            *   On the primary Mac, the easiest way is usually to **quit and restart the DaVinci Resolve Project Server application**.
+            *   Alternatively, restarting the primary Mac will also work.
 
         **Step 4: Verify Primary Server is Running**
-            *   After reloading/restarting, ensure your primary PostgreSQL server (and the DaVinci Resolve Project Server application, if used) is running and accessible before proceeding to start the Laterbase services.
+            *   Make sure the primary PostgreSQL server (and DaVinci Resolve Project Server, if used) is running before starting Laterbase.
 
 3.  **Create Backup Directory:**
     *   In the same directory as the `docker-compose.yml` file on your Docker host, create the backups directory (if using the default `LOCAL_BACKUP_PATH`):
@@ -135,9 +110,8 @@ graph TD
         mkdir backups
         ```
 
-4.  **(Removed)** Rclone configuration is no longer needed. Duplicati is configured via its Web UI.
 
-## Usage
+## Usage & configuration of duplicati and pgadmin, 
 
 1.  **Build and Start Containers:**
     *   Navigate to the project directory in your terminal.
@@ -176,16 +150,3 @@ graph TD
         ```bash
         docker-compose down
         ```
-
-## Files
-
-*   `docker-compose.yml`: Defines the services (`standby`, `backup-agent`, `duplicati`, `pgadmin`, `scheduler`), their configurations, volumes, and network.
-*   `app/Dockerfile`: Instructions to build the PostgreSQL standby server image (based on `postgres:15`).
-*   `backup/Dockerfile.backup`: Instructions to build the `backup-agent` image (based on Debian, includes only `postgresql-client`).
-*   `.env`: Configuration file for environment variables (database credentials, pgAdmin login, etc.). **Requires user configuration.**
-*   `app/prepare_primary_db.sh`: **(New)** Script to automate granting replication role and creating the replication slot on the primary server via `psql`. Run manually before starting services.
-*   `app/setup_standby.sh`: Script run inside the standby container on first start to perform the initial base backup and configure replication.
-*   `backup/backup.sh`: Script run hourly (via Ofelia scheduler) inside the backup agent container to perform `pg_dump` backups into the `/backups` volume and manage local `.sql.gz` file retention.
-*   `backup/entrypoint.sh`: (Removed/Unused) No longer needed for the simplified `backup-agent`.
-*   `./backups/` (Directory to be created, or path set in `LOCAL_BACKUP_PATH`): Host directory where local backup files (`.sql.gz`) are stored by `backup-agent` and read by `duplicati`.
-*   `duplicati_data` (Docker Volume): Stores Duplicati's configuration database and local state.

@@ -20,10 +20,12 @@ services:
       POSTGRES_PASSWORD: ${REPL_PASSWORD} # Required by base image entrypoint
       # --- Other Settings ---
       POSTGRES_INITDB_ARGS: "--no-sync" # Faster init, safe for initial setup
+      PGADMIN_ACCESS_SUBNET: ${PGADMIN_ACCESS_SUBNET:-127.0.0.1/32}
+      PG_REALWORLD_SUBNET: ${PG_REALWORLD_SUBNET}
     volumes:
       - laterbase_standby_data:${PGDATA:-/var/lib/postgresql/data/pgdata}
     ports:
-      - "5433:5432"
+      - "5432:5432"
     restart: unless-stopped
     networks:
       - network

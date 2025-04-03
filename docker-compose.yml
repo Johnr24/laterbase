@@ -102,6 +102,34 @@ services:
       - network
     restart: unless-stopped
 
+  # --- Restore UI Service ---
+  restore-ui:
+    build:
+      context: ./restore_ui
+      dockerfile: Dockerfile
+    container_name: restore_ui
+    env_file:
+      - .env
+    environment:
+      # Connection details for the DB server where new DBs will be created
+      TARGET_DB_HOST: ${PRIMARY_HOST} # Connect to the primary DB service
+      TARGET_DB_PORT: ${PRIMARY_PORT:-5432} # Use the same port as primary/standby
+      TARGET_DB_USER: ${POSTGRES_USER:-postgres} # Use the same user as standby
+      TARGET_DB_PASSWORD: ${REPL_PASSWORD} # Use the standby's password (MUST be in .env)
+      # Flask specific settings
+      FLASK_ENV: development # Set to 'production' for production
+      PYTHONUNBUFFERED: 1 # Ensure logs appear instantly
+    volumes:
+      # Mount the shared backup directory (read-only)
+      - ${LOCAL_BACKUP_PATH:-./backups}:/backups:ro
+    ports:
+      - "5001:5001" # Expose Flask app port
+    networks:
+      - network
+    restart: unless-stopped
+    depends_on:
+      - standby # Ensure the target DB service is running
+
   # --- Ofelia Scheduler Service ---
   scheduler:
     image: mcuadros/ofelia:latest

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PostgreSQL Backup Restore</title>
+    <!-- Simple styling with Bootstrap CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; }
+        .flash-messages .alert { margin-bottom: 15px; }
+        .backup-item { display: flex; justify-content: space-between; align-items: center; }
+        .backup-item span { margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PostgreSQL Backup Restore</h1>
+        <p>Select a backup file and provide a suffix for the new database name.</p>
+        <p>The new database will be named <code>original_db_name_suffix</code>.</p>
+        <p>For example, if the original database is <code>mydb</code> and the suffix is <code>_restore_test</code>, the new database will be named <code>mydb_restore_test</code>.</p>
+
+        <!-- Flash Messages -->
+        <div class="flash-messages">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        <hr>
+
+        {% if backups %}
+            <form action="{{ url_for('restore_backup') }}" method="post">
+                <div class="mb-3">
+                    <label for="backup_file" class="form-label">Select Backup File:</label>
+                    <select class="form-select" id="backup_file" name="backup_file" required>
+                        <option value="" disabled selected>-- Select a backup --</option>
+                        {% for backup in backups %}
+                            <option value="{{ backup.filename }}">
+                                {{ backup.filename }} (Original DB: {{ backup.original_db }})
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="restore_suffix" class="form-label">New Database Suffix:</label>
+                    <input type="text" class="form-control" id="restore_suffix" name="restore_suffix" value="{{ default_suffix }}" placeholder="e.g., _restore_test" required>
+                    <div class="form-text">Only letters, numbers, and underscores allowed. Default: {{ default_suffix }}</div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Restore Backup</button>
+            </form>
+        {% else %}
+            <div class="alert alert-warning" role="alert">
+                No backup files found in the backup directory ({{ BACKUP_DIR }}). Ensure backups exist and the volume is mounted correctly.
+            </div>
+        {% endif %}
+
+    </div>
+    <!-- Bootstrap JS Bundle (needed for alert dismissal) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
